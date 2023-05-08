@@ -21,9 +21,6 @@ services:
         published: 443
         mode: host
         protocol: tcp
-      # additional ports
-      - '9001:9001'
-      - '9002:9002'
 
     deploy:
       mode: global
@@ -51,12 +48,12 @@ services:
         # traefik-http set up only to use the middleware to redirect to https
         # Uses the environment variable DOMAIN
         - traefik.http.routers.traefik-public-http.rule=Host(`${DOMAIN?Variable not set}`)
-        - traefik.http.routers.traefik-public-http.entrypoints=traefik-ui
+        - traefik.http.routers.traefik-public-http.entrypoints=http
         - traefik.http.routers.traefik-public-http.middlewares=https-redirect
         # traefik-https the actual router using HTTPS
         # Uses the environment variable DOMAIN
         - traefik.http.routers.traefik-public-https.rule=Host(`${DOMAIN?Variable not set}`)
-        - traefik.http.routers.traefik-public-https.entrypoints=traefik-ui
+        - traefik.http.routers.traefik-public-https.entrypoints=https
         - traefik.http.routers.traefik-public-https.tls=true
         # Use the special Traefik service api@internal with the web UI/Dashboard
         - traefik.http.routers.traefik-public-https.service=api@internal
@@ -66,11 +63,6 @@ services:
         - traefik.http.routers.traefik-public-https.middlewares=admin-auth
         # Define the port inside of the Docker service to use
         - traefik.http.services.traefik-public.loadbalancer.server.port=8080
-
-        # Redirect non-www to www middleware
-        - "traefik.http.middlewares.non-www-to-www.redirectregex.regex=^https?://(?:www\\.)?(.+)"
-        - "traefik.http.middlewares.non-www-to-www.redirectregex.permanent=true"
-        - "traefik.http.middlewares.non-www-to-www.redirectregex.replacement=https://www.$${1}"
 
       resources:
         limits:
@@ -93,7 +85,7 @@ services:
       # Enable Docker in Traefik, so that it reads labels from Docker services
       - --providers.docker
       - --providers.docker.network=traefik-public
-     # Add a constraint to only use services with the label "traefik.constraint-label=traefik-public"
+      # Add a constraint to only use services with the label "traefik.constraint-label=traefik-public"
       - --providers.docker.constraints=Label(`traefik.constraint-label`, `traefik-public`)
       # Do not expose all Docker services, only the ones explicitly exposed
       - --providers.docker.exposedbydefault=false
@@ -116,11 +108,6 @@ services:
       - --log
       # Enable the Dashboard and API
       - --api
-
-      #  entrypoints defines ports for services
-      - --entrypoints.traefik-ui.address=:9001
-      - --entrypoints.service-02.address=:9002
-
 
     networks:
       # Use the public network created to be shared between Traefik and
