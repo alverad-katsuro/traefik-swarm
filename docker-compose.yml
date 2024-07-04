@@ -7,125 +7,100 @@ version: '3.9'
 services:
 
   traefik:
-    # Use the latest Traefik image
-    image: traefik:v2.9
+    image: traefik:v3.0
+    env_file:
+      - .env
     ports:
-      # Host mode is essential to work with IPv6
-      # Listen on port 80, default for HTTP, necessary to redirect to HTTPS
+      # Porta 80 para HTTP
       - target: 80
         published: 80
         mode: host
         protocol: tcp
-      # Listen on port 443, default for HTTPS
+      # Porta 443 para HTTPS
       - target: 443
         published: 443
         mode: host
         protocol: tcp
+          #      - target: 22
+          #        published: 22
+          #        mode: host
+          #        protocol: tcp
+          #      - target: 25565
+          #        published: 25565
+          #        mode: host
+          #        protocol: tcp
 
     deploy:
       mode: global
       placement:
         constraints:
-          # Make the traefik service run only on the node with this label
-          # as the node with it has the volume for the certificates
+          # Traefik só rodara no node que tiver a seguinte constraint visto que
+          # ele também armazena o certificados SSL
           - node.labels.traefik-public.traefik-public-certificates == true
           - node.role == manager
       labels:
-        # Enable Traefik for this service, to make it available in the public network
+        # Habilita o Traefik para o container
         - traefik.enable=true
-        # Use the traefik-public network (declared below)
+        # Usa a rede traefik-public
         - traefik.docker.network=traefik-public
-        # Use the custom label "traefik.constraint-label=traefik-public"
-        # This public Traefik will only use services with this label
-        # That way you can add other internal Traefik instances per stack if needed
+        # Só aceitará containers com a label "traefik.constraint-label=traefik-public"
+        # Dessa forma é possivel que existam mais que uma instancia do traefik rodando
+        # se necessario apenas sendo necessaria a troca da label
         - traefik.constraint-label=traefik-public
-        # admin-auth middleware with HTTP Basic auth
-        # Using the environment variables USERNAME and HASHED_PASSWORD
+        # Adiciona o middleware de autenticação basica
+        # Fazendo uso das variaveis USERNAME e HASHED_PASSWORD
         - "traefik.http.middlewares.admin-auth.basicauth.users=${USERNAME?Variable not set}:${HASHED_PASSWORD?Variable not set}"
-        # https-redirect middleware to redirect HTTP to HTTPS
-        # It can be re-used by other stacks in other Docker Compose files
+        # Redireciona de HTTP para HTTPS por meio do middleware https-redirect
         - traefik.http.middlewares.https-redirect.redirectscheme.scheme=https
         - traefik.http.middlewares.https-redirect.redirectscheme.permanent=true
-        # traefik-http set up only to use the middleware to redirect to https
-        # Uses the environment variable DOMAIN
+        # Cria um router HTTP que será usado apenas para redirecionamento para HTTPS
         - traefik.http.routers.traefik-public-http.rule=Host(`${DOMAIN?Variable not set}`)
         - traefik.http.routers.traefik-public-http.entrypoints=http
         - traefik.http.routers.traefik-public-http.middlewares=https-redirect
-        # traefik-https the actual router using HTTPS
-        # Uses the environment variable DOMAIN
+        - traefik.http.routers.traefik-public-http.priority=10
+        # Router HTTPS que servira a dashboard do traefik
         - traefik.http.routers.traefik-public-https.rule=Host(`${DOMAIN?Variable not set}`)
         - traefik.http.routers.traefik-public-https.entrypoints=https
         - traefik.http.routers.traefik-public-https.tls=true
-        # Use the special Traefik service api@internal with the web UI/Dashboard
+        - traefik.http.routers.traefik-public-https.priority=10
+        # Usa o serviço Traefik service api@internal para a web UI/Dashboard
         - traefik.http.routers.traefik-public-https.service=api@internal
-        # Use the "le" (Let's Encrypt) resolver created below
+        # Usa o Let's Encrypt para gerar certificado SSL
         - traefik.http.routers.traefik-public-https.tls.certresolver=le
-        # Enable HTTP Basic auth, using the middleware created above
+        # Faz uso do middleware de autenticação basica criado acima
         - traefik.http.routers.traefik-public-https.middlewares=admin-auth
-        # Define the port inside of the Docker service to use
+        # Define a porta interna do docker que a interface do traefik roda
         - traefik.http.services.traefik-public.loadbalancer.server.port=8080
 
-      resources:
+      resources: # Limita quantidade de memoria e CPU do Traefik
         limits:
-          memory: 512M
+          memory: 2048M
         reservations:
-          cpus: '0.25'
-          memory: 256M
+          cpus: '1'
+          memory: 512M
       update_config:
         order: stop-first
 
+
     volumes:
-      # Add Docker as a mounted volume, so that Traefik can read the labels of other services
+      # Monta o socket do docker como read-only para que o traefik possa observar os containers
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./dynamic:/dynamic
-      # Mount the volume to store the certificates
+      # Monta um volume que será utilizado para o certificados SSL
       - traefik-public-certificates:/certificates
-      # Mount log folder
+      # Monta a pasta de Logs
       - /var/log/traefik:/var/log/traefik
-    command:
-      # Enable Docker in Traefik, so that it reads labels from Docker services
-      - --providers.docker
-      - --providers.docker.network=traefik-public
-      # Provider diretorio
-      - --providers.file.directory=/dynamic
-      - --providers.file.watch=true
-      # Add a constraint to only use services with the label "traefik.constraint-label=traefik-public"
-      - --providers.docker.constraints=Label(`traefik.constraint-label`, `traefik-public`)
-      # Do not expose all Docker services, only the ones explicitly exposed
-      - --providers.docker.exposedbydefault=false
-      # Enable Docker Swarm mode
-      - --providers.docker.swarmmode
-      # Create an entrypoint "http" listening on address 80
-      - --entrypoints.http.address=:80
-      # Create an entrypoint "https" listening on address 443
-      - --entrypoints.https.address=:443
-      # Create an entrypoint "sgaws" listening on address 2020
-      - --entrypoints.minecraft.address=:25565
-      # Create the certificate resolver "le" for Let's Encrypt, uses the environment variable EMAIL
-      - --certificatesresolvers.le.acme.email=${EMAIL?Variable not set}
-      # Store the Let's Encrypt certificates in the mounted volume
-      - --certificatesresolvers.le.acme.storage=/certificates/acme.json
-      # Use the TLS Challenge for Let's Encrypt
-      - --certificatesresolvers.le.acme.tlschallenge=true
-      # Enable the access log, with HTTP requests
-      - --accesslog.bufferingsize=100
-      - --accesslog.filepath=/var/log/traefik/traefik-access.log
-      # Enable the Traefik log, for configurations and errors
-      - --log
-      # Enable the Dashboard and API
-      - --api
+      # Monta a pasta de configuração dinamica
+      - /home/alfredogdso/traefik-swarm/config:/etc/traefik
+
+    environment:
+      - CF_DNS_API_TOKEN=<REMOVIDO>
 
     networks:
-      # Use the public network created to be shared between Traefik and
-      # any other service that needs to be publicly available with HTTPS
       - traefik-public
 
 volumes:
   traefik-public-certificates:
 
-
 networks:
-  # Use the previously created public network "traefik-public", shared with other
-  # services that need to be publicly available via this Traefik
   traefik-public:
     external: true

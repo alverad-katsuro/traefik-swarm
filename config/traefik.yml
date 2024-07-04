@@ -1,0 +1,47 @@
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+serversTransport:
+  insecureSkipVerify: true
+providers:
+  swarm:
+    endpoint: 'unix:///var/run/docker.sock'
+    exposedByDefault: false
+    constraints: "Label(`traefik.constraint-label`, `traefik-public`)"
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+entryPoints:
+  http:
+    address: :80
+    forwardedHeaders:
+      insecure: true
+  https:
+    address: :443
+    forwardedHeaders:
+      insecure: true
+      #  ssh:
+      #    address: :22
+      #  mc:
+      #    address: :25565
+certificatesResolvers:
+  le:
+    acme:
+      email: <REMOVIDO> 
+      storage: /certificates/acme.json
+      caServer: "https://acme-v02.api.letsencrypt.org/directory"
+      dnsChallenge:
+        provider: cloudflare
+        resolvers:
+          - "1.1.1.1:53"
+          - "8.8.8.8:53"
+api:
+  dashboard: true
+log:
+  level: ERROR
+  format: common
+  filePath: /var/log/traefik/traefik.log
+accesslog:
+  format: common
+  filePath: /var/log/traefik/traefik-access.log
+  bufferingSize: 100
